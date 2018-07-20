@@ -46,18 +46,20 @@
 #define METRIC_SUFFIX ".metric"
 #define SUFFIX_LEN (sizeof(METRIC_SUFFIX) - 1)
 
-// The first 11 bytes of each file are the ttl in 10 decimal digits, followed
-// by \n.  This is a compromise between machine and human readability
+// The first 10 bytes of each file are the ttl in 10 decimal digits, followed
+// by \n.
 #define TTL_FMT "%010d\n"
-#define TTL_LEN 11
+#define TTL_LEN 10
 
 // The next 11 bytes specify the unit of the metric, right-padded with spaces
 // and followed by \n
 #define UNIT_FMT "%-10.10s\n"
-#define UNIT_LEN 11
+#define UNIT_START (TTL_LEN + 1)
+#define UNIT_LEN 10
 
-#define HEADER_LEN (TTL_LEN + UNIT_LEN)
-#define PAYLOAD_LEN (128 - HEADER_LEN)
+// The payload is padded with NUL bytes
+#define PAYLOAD_START (UNIT_START + UNIT_LEN + 1)
+#define PAYLOAD_LEN (128 - PAYLOAD_START)
 
 // Convenience macros
 #define streq(s1, s2) (strcmp((s1), (s2)) == 0)
@@ -106,7 +108,7 @@ static ssize_t read_buf(int fd, char* buf, size_t len)
 static int write_value(const char* filename, const char* value, const char* unit, int ttl)
 {
     int fd;
-    char buf[HEADER_LEN + PAYLOAD_LEN];
+    char buf[PAYLOAD_START + PAYLOAD_LEN];
     size_t value_len;
     int err = 0;
 
@@ -120,9 +122,9 @@ static int write_value(const char* filename, const char* value, const char* unit
     if (ttl < 0)
         ttl = 0;
     sprintf(buf, TTL_FMT, ttl);
-    sprintf(buf + TTL_LEN, UNIT_FMT, unit);
-    memcpy(buf + HEADER_LEN, value, value_len);
-    memset(buf + HEADER_LEN + value_len, 0, sizeof(buf) - HEADER_LEN - value_len);
+    sprintf(buf + UNIT_START, UNIT_FMT, unit);
+    memcpy(buf + PAYLOAD_START, value, value_len);
+    memset(buf + PAYLOAD_START + value_len, 0, PAYLOAD_LEN - value_len);
     if (pwrite(fd, buf, sizeof(buf), 0) < 0)
         err = -1;
     if (close(fd) < 0)
@@ -147,9 +149,9 @@ static int parse_ttl(char* ttl_str, time_t& ttl)
     int res;
 
     // Delete the '\n'
-    ttl_str[TTL_LEN - 1] = '\0';
+    ttl_str[TTL_LEN] = '\0';
     res = strtol(ttl_str, &err, 10);
-    if (err != ttl_str + TTL_LEN - 1) {
+    if (err != ttl_str + TTL_LEN) {
         errno = ERANGE;
         return -1;
     }
@@ -163,7 +165,7 @@ static int read_value(const char* filename, T& value, T& unit, bool need_unit = 
 {
     int fd;
     struct stat st;
-    char buf[HEADER_LEN + PAYLOAD_LEN];
+    char buf[PAYLOAD_START + PAYLOAD_LEN];
     time_t now, ttl;
     int ret = -1;
 
@@ -174,7 +176,7 @@ static int read_value(const char* filename, T& value, T& unit, bool need_unit = 
     if (read_buf(fd, buf, sizeof(buf)) < 0)
         goto out_fd;
 
-    buf[TTL_LEN - 1] = '\0';
+    buf[TTL_LEN] = '\0';
     if (parse_ttl(buf, ttl) < 0)
         goto out_fd;
     if (ttl) {
@@ -185,15 +187,15 @@ static int read_value(const char* filename, T& value, T& unit, bool need_unit = 
         }
     }
     if (need_unit) {
-        char *unit_buf = buf + TTL_LEN;
+        char *unit_buf = buf + UNIT_START;
         // Trim the padding spaces
-        int i = UNIT_LEN - 1;
+        int i = UNIT_LEN;
         while (unit_buf[i] == ' ' || unit_buf[i] == '\n')
             --i;
         unit_buf[i + 1] = '\0';
         unit = dup_str(unit_buf, T());
     }
-    value = dup_str(buf + HEADER_LEN, T());
+    value = dup_str(buf + PAYLOAD_START, T());
     ret = 0;
 
 out_fd:
@@ -283,7 +285,7 @@ int fty_shm_cleanup(bool verbose)
         time_t now, ttl;
         struct stat st1, st2;
         size_t len = strlen(de->d_name);
-        char ttl_str[TTL_LEN];
+        char ttl_str[TTL_LEN + 1];
 
         if (len < SUFFIX_LEN)
             // Malformed filename
@@ -300,12 +302,12 @@ int fty_shm_cleanup(bool verbose)
             close(fd);
             continue;
         }
-        if (st1.st_size < HEADER_LEN) {
+        if (st1.st_size < PAYLOAD_START) {
             // Malformed file
             close(fd);
             continue;
         }
-        if (read_buf(fd, ttl_str, TTL_LEN) < 0) {
+        if (read_buf(fd, ttl_str, sizeof(ttl_str)) < 0) {
             err = -1;
             close(fd);
             continue;
