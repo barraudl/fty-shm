@@ -48,12 +48,10 @@
 
 // The first 10 bytes of each file are the ttl in 10 decimal digits, followed
 // by \n.
-#define TTL_FMT "%010d\n"
 #define TTL_LEN 10
 
 // The next 11 bytes specify the unit of the metric, right-padded with spaces
 // and followed by \n
-#define UNIT_FMT "%-10.10s\n"
 #define UNIT_START (TTL_LEN + 1)
 #define UNIT_LEN 10
 
@@ -109,7 +107,7 @@ static int write_value(const char* filename, const char* value, const char* unit
 {
     int fd;
     char buf[PAYLOAD_START + PAYLOAD_LEN];
-    size_t value_len;
+    size_t value_len, unit_len;
     int err = 0;
 
     value_len = strlen(value);
@@ -117,12 +115,25 @@ static int write_value(const char* filename, const char* value, const char* unit
         errno = EINVAL;
         return -1;
     }
+    unit_len = strlen(unit);
+    if (unit_len > UNIT_LEN) {
+        errno = EINVAL;
+        return -1;
+    }
     if ((fd = open(filename, O_CREAT | O_RDWR | O_CLOEXEC, 0666)) < 0)
         return -1;
     if (ttl < 0)
         ttl = 0;
-    sprintf(buf, TTL_FMT, ttl);
-    sprintf(buf + UNIT_START, UNIT_FMT, unit);
+    for (int i = TTL_LEN - 1; i >= 0; --i) {
+        buf[i] = '0' + ttl % 10;
+        ttl /= 10;
+    }
+    buf[TTL_LEN] = '\n';
+
+    memcpy(buf + UNIT_START, unit, unit_len);
+    memset(buf + UNIT_START + unit_len, ' ', UNIT_LEN - unit_len);
+    buf[UNIT_START + UNIT_LEN] = '\n';
+
     memcpy(buf + PAYLOAD_START, value, value_len);
     memset(buf + PAYLOAD_START + value_len, 0, PAYLOAD_LEN - value_len);
     if (pwrite(fd, buf, sizeof(buf), 0) < 0)
