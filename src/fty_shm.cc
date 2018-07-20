@@ -103,19 +103,16 @@ static ssize_t read_buf(int fd, char* buf, size_t len)
 }
 
 // Write ttl and value to filename
-static int write_value(const char* filename, const char* value, const char* unit, int ttl)
+static int write_value(const char* filename, const char* value, size_t value_len, const char* unit, size_t unit_len, int ttl)
 {
     int fd;
     char buf[PAYLOAD_START + PAYLOAD_LEN];
-    size_t value_len, unit_len;
     int err = 0;
 
-    value_len = strlen(value);
     if (value_len > PAYLOAD_LEN) {
         errno = EINVAL;
         return -1;
     }
-    unit_len = strlen(unit);
     if (unit_len > UNIT_LEN) {
         errno = EINVAL;
         return -1;
@@ -220,7 +217,7 @@ int fty_shm_write_metric(const char* asset, const char* metric, const char* valu
 
     if (prepare_filename(filename, asset, strlen(asset), metric, strlen(metric)) < 0)
         return -1;
-    return write_value(filename, value, unit, ttl);
+    return write_value(filename, value, strlen(value), unit, strlen(unit), ttl);
 }
 
 int fty_shm_read_metric(const char* asset, const char* metric, char** value, char** unit)
@@ -376,7 +373,7 @@ int fty::shm::write_metric(const std::string& asset, const std::string& metric, 
 
     if (prepare_filename(filename, asset.c_str(), asset.length(), metric.c_str(), metric.length()) < 0)
         return -1;
-    return write_value(filename, value.c_str(), unit.c_str(), ttl);
+    return write_value(filename, value.c_str(), value.length(), unit.c_str(), unit.length(), ttl);
 }
 
 int fty::shm::read_metric(const std::string& asset, const std::string& metric, std::string& value)
